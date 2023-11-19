@@ -1,0 +1,176 @@
+
+- become: yes
+  block:
+
+  - name: Add GitLab Community apt repository
+    ansible.builtin.get_url: 
+      url: https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh
+      dest: /tmp/ce-script.deb.sh
+      mode: '0755' 
+    register: ce_script
+
+  - name: Run ce-script.deb.sh
+    ansible.builtin.command: /tmp/ce-script.deb.sh
+    when: ce_script.changed
+
+  - name: Add GitLab Enterprice apt repository
+    ansible.builtin.get_url:
+      url: https://packages.gitlab.com/install/repositories/gitlab/gitlab-ee/script.deb.sh
+      dest: /tmp/ee-script.deb.sh
+      mode: '0755'
+    register: ee_script
+  
+  - name: Run ee-script.deb.sh
+    ansible.builtin.command: /tmp/ee-script.deb.sh
+    when: ee_script.changed
+
+  - name: Apt update
+    apt:
+      update_cache: yes
+      cache_valid_time: 36000
+    # For Russia
+    retries: 3
+    delay: 10  
+
+    # One day installing already installed package promted me that it will be downgraded...
+    # Allow downgrades (https://github.com/ansible/ansible/issues/29451)
+  - name: Install GitLab {{ gitlab.package }}
+    command: apt install {{ gitlab.package }} -y --allow-downgrades --assume-yes
+    register: r
+    changed_when: "'0 upgraded, 0 newly installed, 0 to remove' not in r.stdout"
+    notify: Reconfigure gitlab
+
+  # Did not fix version to avoid "Packages were downgraded and -y was used without --allow-downgrades."
+  # It looks like this package was installed via gitlab package
+  # Not very important anyway 
+  - name: Install rsync
+    apt:
+      name: rsync
+      state: present
+
+  - name: Install postfix 3.4.13
+    apt: 
+      name: postfix=3.4.13-0ubuntu1.2
+      state: present
+
+  - name: Copy GitLab configuration
+    ansible.builtin.template:
+      src: templates/gitlab.rb.j2
+      dest: /etc/gitlab/gitlab.rb
+      owner: ubuntu
+      group: ubuntu
+      mode: '0644'
+    notify: Reconfigure gitlab
+
+  - name: Create certs dir
+    file:
+      path: /etc/gitlab/ssl
+      state: directory
+      owner: ubuntu
+      group: ubuntu
+      mode: u=r,g=r,o-rwx
+
+  - name: Copy TLS certificate
+    copy:
+      src: "{{ gitlab.tls_certificate.src }}"
+      dest: /etc/gitlab/ssl/{{ gitlab.host }}.crt
+      remote_src: "{{ gitlab.tls_certificate.remote_src }}"
+      mode: '0644'
+    when: not gitlab.tls_certificate.create_link
+    notify: Restart gitlab
+
+  - name: Create a symbolic link to the TLS certificate
+    ansible.builtin.file:
+      src: "{{ gitlab.tls_certificate.src }}"
+      dest: /etc/gitlab/ssl/{{ gitlab.host }}.crt
+      state: link
+      force: yes
+    when: gitlab.tls_certificate.create_link and gitlab.tls_certificate.remote_src
+    notify: Restart gitlab
+
+  - name: Copy TLS key
+    copy:
+      src: "{{ gitlab.tls_key.src }}"
+      dest: /etc/gitlab/ssl/{{ gitlab.host }}.key
+      remote_src: "{{ gitlab.tls_key.remote_src }}"
+      mode: '0644'
+    when: not gitlab.tls_key.create_link
+    notify: Restart gitlab
+
+  - name: Create a symbolic link to the TLS key
+    ansible.builtin.file:
+      src: "{{ gitlab.tls_key.src }}"
+      dest: /etc/gitlab/ssl/{{ gitlab.host }}.key
+      state: link
+      force: yes
+    when: gitlab.tls_key.create_link and gitlab.tls_key.remote_src
+    notify: Restart gitlab
+
+  - name: Ensure gitlab reconfigured
+    meta: flush_handlers
+
+  - name: Set root user password
+    ansible.builtin.expect:
+      command: gitlab-rake "gitlab:password:reset[root]"
+      responses:
+        "Enter password: ": "{{ gitlab.root_password }}"
+        "Confirm password: ": "{{ gitlab.root_password }}"
+    timeout: 120
+    retries: 10
+    delay: 6
+    no_log: "{{ hide_secrtets_from_log }}"
+    changed_when: false
+
+  - name: Create cron job to clear old job.log
+    ansible.builtin.cron:
+      name: "clear job.log"
+      minute: "0"
+      hour: "9"
+      job: >-
+        find "{{ gitlab.artifacts_dir }}"
+        -name "job.log" -mtime +{{ gitlab.ci_logs_lifetime }} -delete
+
+  - name: Create dir for log_clear script
+    ansible.builtin.file:
+      path: /tmp/gitlab_runner_scripts/
+      state: directory
+      mode: '0755'
+
+  - name: Copy rb script for check missing no_log
+    ansible.builtin.copy:
+      src: log_clear.rb
+      dest: /tmp/gitlab_runner_scripts
+      owner: ubuntu
+      group: ubuntu
+      mode: '0644'
+
+  - name: Create cron job for script.rb
+    ansible.builtin.cron:
+      name: "clear gitlab failures with missing job.log"
+      minute: "0"
+      hour: "9"
+      job: >-
+        gitlab-rails runner /tmp/gitlab_runner_scripts/log_clear.rb
+  
+  - name: Check ansible cfg on artifact expire 
+    ansible.builtin.lineinfile:
+      path: /etc/gitlab/gitlab.rb
+      regexp: "'expire_build_artifacts_worker_cron'"
+      line: gitlab_rails['expire_build_artifacts_worker_cron'] = "0 9 * * *"
+    notify: Reconfigure gitlab
+
+  # Failed to update apt cache: E:Failed to fetch https://packages.gitlab.com/gitlab/gitlab-ee/ubuntu/dists/focal/InRelease  403  Forbidden [IP: 188.114.98.234 443], E:The repository 'https://packages.gitlab.com/gitlab/gitlab-ee/ubuntu focal InRelease' is not signed.
+  - name: Remove Gitlab apt repositories to avoid problems with Russian IPs
+    block:
+
+    - name: Find gitlab apt repositories
+      find:
+        paths: /etc/apt/sources.list.d
+        patterns: gitlab_gitlab-*
+      register: files_to_delete
+
+    - name: Remove repositories
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ files_to_delete.files }}"

@@ -1,0 +1,12 @@
+gitlab:
+  redirect_http_to_https: true
+  tls_certificate:
+    create_link: false
+    remote_src: false
+  tls_key:
+    create_link: false
+    remote_src: false
+  backup_path: /var/backups/gitlab
+  config_part_template_paths: []
+  ci_logs_lifetime: 30
+  artifacts_dir: /var/opt/gitlab/gitlab-rails/shared/artifacts

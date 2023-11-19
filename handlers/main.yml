@@ -1,0 +1,11 @@
+
+- become: yes
+  block:
+
+  - name: Reconfigure gitlab
+    command: gitlab-ctl reconfigure
+    changed_when: false
+
+  - name: Restart gitlab
+    command: gitlab-ctl restart   
+    changed_when: false 

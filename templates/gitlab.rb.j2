@@ -1,0 +1,35 @@
+external_url '{{ gitlab.url }}'
+node_exporter['enable'] = false
+#node_exporter['listen_address'] = '0.0.0.0:9100'
+#postgres_exporter['listen_address'] = '0.0.0.0:9187'
+prometheus_monitoring['enable'] = false
+prometheus['enable'] = false
+gitlab_exporter['enable'] = true
+gitlab_exporter['listen_address'] = '0.0.0.0'
+gitlab_exporter['listen_port'] = '9168'
+
+letsencrypt['enable'] = false
+# letsencrypt['enable'] = true
+# letsencrypt['auto_renew'] = true
+# letsencrypt['auto_renew_hour'] = "12"
+# letsencrypt['auto_renew_minute'] = "30"
+# letsencrypt['auto_renew_day_of_month'] = "*/7"
+nginx['redirect_http_to_https'] = {{ gitlab.redirect_http_to_https | lower }}
+nginx['listen_port'] = 443
+nginx['listen_https'] = true
+gitlab_rails['backup_path'] = '{{ gitlab.backup_path }}'
+{% if gitlab.api_id is defined and gitlab.api_secret is defined %}
+gitlab_rails['omniauth_providers'] = [
+  {
+    "name" => "gitlab",
+    "app_id" => "{{ gitlab.api_id }}",
+    "app_secret" => "{{ gitlab.api_secret }}",
+    "args" => { "scope" => "api" }
+  }
+]
+{% endif %}
+
+{% for path in gitlab.config_part_template_paths %}
+# Part from "{{ path }}"
+{{ lookup('template', path) }}
+{% endfor %}
