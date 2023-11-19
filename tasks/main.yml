@@ -48,9 +48,9 @@
       name: rsync
       state: present
 
-  - name: Install postfix 3.4.13
+  - name: Install postfix
     apt: 
-      name: postfix=3.4.13-0ubuntu1.2
+      name: postfix
       state: present
 
   - name: Copy GitLab configuration
