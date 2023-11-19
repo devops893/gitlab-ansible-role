@@ -32,13 +32,13 @@
     retries: 3
     delay: 10  
 
-    # One day installing already installed package promted me that it will be downgraded...
-    # Allow downgrades (https://github.com/ansible/ansible/issues/29451)
-  - name: Install GitLab {{ gitlab.package }}
-    command: apt install {{ gitlab.package }} -y --allow-downgrades --assume-yes
-    register: r
-    changed_when: "'0 upgraded, 0 newly installed, 0 to remove' not in r.stdout"
-    notify: Reconfigure gitlab
+  #   # One day installing already installed package promted me that it will be downgraded...
+  #   # Allow downgrades (https://github.com/ansible/ansible/issues/29451)
+  # - name: Install GitLab {{ gitlab.package }}
+  #   command: apt install {{ gitlab.package }} -y --allow-downgrades --assume-yes
+  #   register: r
+  #   changed_when: "'0 upgraded, 0 newly installed, 0 to remove' not in r.stdout"
+  #   notify: Reconfigure gitlab
 
   # Did not fix version to avoid "Packages were downgraded and -y was used without --allow-downgrades."
   # It looks like this package was installed via gitlab package
